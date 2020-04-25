@@ -1,0 +1,81 @@
+DATASET = "192B_L002 192T_L001 192T_L002".split()
+
+REFERENCE_FASTA = "$SCRATCH/igenomes_ref/Homo_sapiens_assembly38.fasta"
+
+rule all:
+    input:
+        expand("Preprocessing/bwa_alignment/{sample}_{lane}.bam", sample = DATASET)
+    shell:
+    "date"
+
+# rule load_modules:
+#     shell:
+#         """
+#         module load conda bwa/0.7.17
+#         source activate WGS
+#         """
+
+rule rename_files:
+    input:
+        i1 = "{sample}_{S1}_{lane}_R1_001.fastq.gz",
+        i2 = "{sample}_{S1}_{lane}_R2_001.fastq.gz"
+    output:
+        o1 = "Preprocessing/renamed/{sample}_{lane}_R1.fastq.gz",
+        o2 = "Preprocessing/renamed/{sample}_{lane}_R2.fastq.gz"
+    shell:
+        """
+        ln -s {input.i1} {output.o1}
+        ln -s {input.i1} {output.o2}
+        """
+
+rule fastqcFASTQ:
+    input:
+        i1 = "Preprocessing/renamed/{sample}_{lane}_R1.fastq.gz",
+        i2 = "Preprocessing/renamed/{sample}_{lane}_R2.fastq.gz"
+    output:
+        o1 = "Reports/FastQC/{sample}_{lane}_R1_fastqc.html",
+        o2 = "Reports/FastQC/{sample}_{lane}_R2_fastqc.html"
+    threads:40
+    shell:
+        """
+        fastqc -t {threads} -q {input.i1} {input.i2} --outdir=Reports/FastQC/
+        """
+
+rule trim_galore
+    input:
+        i1 = "{sample}_{lane}_R1.fastq.gz",
+        i2 = "{sample}_{lane}_R2.fastq.gz"
+    output:
+        o1 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R1_val_1.fq.gz",
+        o2 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R2_val_2.fq.gz"
+    threads: 40
+    shell:
+        """
+        trim_galore --paired {input.i1} {input.i2} -o Preprocessing/trimmed_fastq -j {threads}
+        """
+
+rule bwa_mem:
+    input:
+        i1 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R1_val_1.fq.gz",
+        i2 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R2_val_2.fq.gz"
+    output:
+        o1 = "Preprocessing/bwa_alignment/{sample}_{lane}.bam"
+    threads: 40
+    shell:
+    """
+    bwa mem -K 100000000 \
+    -R "@RG\tID:{wildcards.lane}\tPU:{wildcards.lane}\tSM:{wildcards.sample}\tLB:{wildcards.sample}\tPL:illumina" \
+    -B 3 -t 40 -M {REFERENCE_FASTA} \
+     {input.i1} {input.i2} | samtools sort --threads {threads} -m 4G - > {output.o1}
+    """
+
+# rule recalibrate:
+#     shell:
+#     """
+#     gatk --java-options -Xmx180g BaseRecalibrator \
+#     -I 325B.md.bam -O chr18_15791048-20564714_325B.recal.table  \
+#     --tmp-dir /tmp -R Homo_sapiens_assembly38.fasta \
+#     --known-sites dbsnp_146.hg38.vcf.gz  --known-sites Mills_and_1000G_gold_standard.indels.hg38.vcf.gz \
+#     --known-sites Homo_sapiens_assembly38.known_indels.vcf.gz --verbosity INFO
+#     """
+    # -L chr18_15791048-20564714.bed
