@@ -1,0 +1,19 @@
+SAMPLE, RUNID, LANE, FILE_ID = glob_wildcards("{sample}/{runID}_L{lane}_B5GHUMeikRAAABABA-{file_ID}_1.fq.gz")
+
+### SAMPLE FILE FORMAT: V300032980_L3_B5GHUMeikRAAACABA-517_1.fq.gz
+
+rule mergeFastqR1:
+    output: "merged/{sample}_{runID}_L{lane}_R1.fastq.gz"
+    shell:
+        """
+        mkdir -p "merged
+        cat {wildcards.sample}/{wildcards.runID}_L{wildcards.lane}_*_1.fq.gz > {output}
+        """
+
+rule mergeFastqR2:
+    output: "merged/{sample}_{runID}_L{lane}_R2.fastq.gz"
+    shell:
+        """
+        mkdir -p merged
+        cat {wildcards.sample}/{wildcards.runID}_L{wildcards.lane}_*_2.fq.gz > {output}
+        """

@@ -1,31 +1,52 @@
+import pandas as pd
+
 DATASET = "192B_L002 192T_L001 192T_L002".split()
+clininfo = pd.DataFrame({'Patient': ['325','325','192','192','192'],
+    'type': ['B','T','B','T','T'],
+    'lane': ['L002','L001','L002','L001','L002']})
+
+
+
+def getBamsToMerge(sample):
+    out = []
+    print(sample)
+    filtered_sample = clininfo[clininfo['Patient']==sample]
+    for type in filtered_sample.type.unique().tolist():
+        filtered_type = filtered_sample[filtered_sample['type']==type]
+        print(filtered_type)
+        if len(filtered_type) > 1:
+            for l in filtered_type.lane.unique().tolist():
+                out.append(str(sample)+t+'_'+str(l)+".bam")
+        else:
+            if len(filtered_type) == 1:
+                print("One bam file! Woohoo")
+        #print(out)
+    return(out)
+
 
 REFERENCE_FASTA = "$SCRATCH/igenomes_ref/Homo_sapiens_assembly38.fasta"
 
+###
+localrules: all, rename_files
+
 rule all:
     input:
-        expand("Preprocessing/bwa_alignment/{sample}_{lane}.bam", sample = DATASET)
+        expand("Preprocessing/bwa_alignment/{sample}.bam", sample = DATASET)
     shell:
-    "date"
+    	"date"
 
-# rule load_modules:
-#     shell:
-#         """
-#         module load conda bwa/0.7.17
-#         source activate WGS
-#         """
 
 rule rename_files:
     input:
-        i1 = "{sample}_{S1}_{lane}_R1_001.fastq.gz",
-        i2 = "{sample}_{S1}_{lane}_R2_001.fastq.gz"
+        i1 = "raw/{sample}_{lane}_R1_001.fastq.gz",
+        i2 = "raw/{sample}_{lane}_R2_001.fastq.gz"
     output:
         o1 = "Preprocessing/renamed/{sample}_{lane}_R1.fastq.gz",
         o2 = "Preprocessing/renamed/{sample}_{lane}_R2.fastq.gz"
     shell:
         """
-        ln -s {input.i1} {output.o1}
-        ln -s {input.i1} {output.o2}
+        ln -s $SCRATCH/HPV_WGS/{input.i1}  $SCRATCH/HPV_WGS/{output.o1}
+        ln -s $SCRATCH/HPV_WGS/{input.i1}  $SCRATCH/HPV_WGS/{output.o2}
         """
 
 rule fastqcFASTQ:
@@ -38,35 +59,63 @@ rule fastqcFASTQ:
     threads:40
     shell:
         """
+	set +eu
+	module load anaconda3/2018.12
+	source activate WGS
         fastqc -t {threads} -q {input.i1} {input.i2} --outdir=Reports/FastQC/
-        """
+        set -eu
+	"""
 
-rule trim_galore
+rule trim_galore:
     input:
-        i1 = "{sample}_{lane}_R1.fastq.gz",
-        i2 = "{sample}_{lane}_R2.fastq.gz"
+        i1 = "Preprocessing/renamed/{sample}_{lane}_R1.fastq.gz",
+        i2 = "Preprocessing/renamed/{sample}_{lane}_R2.fastq.gz"
     output:
         o1 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R1_val_1.fq.gz",
         o2 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R2_val_2.fq.gz"
-    threads: 40
+    threads: 80
     shell:
         """
+	set +eu
+	module load anaconda3/2018.12
+	source activate WGS
         trim_galore --paired {input.i1} {input.i2} -o Preprocessing/trimmed_fastq -j {threads}
-        """
+        set -eu
+	"""
 
 rule bwa_mem:
     input:
+        i4 = "Reports/FastQC/{sample}_{lane}_R1_fastqc.html",
+        i3 = "Reports/FastQC/{sample}_{lane}_R2_fastqc.html",
         i1 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R1_val_1.fq.gz",
         i2 = "Preprocessing/trimmed_fastq/{sample}_{lane}_R2_val_2.fq.gz"
     output:
         o1 = "Preprocessing/bwa_alignment/{sample}_{lane}.bam"
     threads: 40
     shell:
+    	"""
+        set +eu
+        module load anaconda3/2018.12
+        source activate WGS
+    	bwa mem -K 100000000 \
+    	-R "@RG\tID:{wildcards.lane}\tPU:{wildcards.lane}\tSM:{wildcards.sample}\tLB:{wildcards.sample}\tPL:illumina" \
+    	-B 3 -t 40 -M {REFERENCE_FASTA} \
+    	{input.i1} {input.i2} | samtools sort --threads {threads} -m 4G - > {output.o1}
+    	set -eu
+        """
+
+rule merge_bam_mapped:
+    input: getBamsToMerge
+    output:
+        {sample}_{type}.BAM
+    threads:40
+    shell:
     """
-    bwa mem -K 100000000 \
-    -R "@RG\tID:{wildcards.lane}\tPU:{wildcards.lane}\tSM:{wildcards.sample}\tLB:{wildcards.sample}\tPL:illumina" \
-    -B 3 -t 40 -M {REFERENCE_FASTA} \
-     {input.i1} {input.i2} | samtools sort --threads {threads} -m 4G - > {output.o1}
+    set +eu
+    module load anaconda3/2018.12
+    source activate WGS
+    samtools merge --threads {threads} {input} {output}
+    set -eu
     """
 
 # rule recalibrate:
